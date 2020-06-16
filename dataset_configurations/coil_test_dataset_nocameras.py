@@ -2,8 +2,8 @@ import random
 
 
 import numpy as np
-from carla import sensor
-from carla.settings import CarlaSettings
+from carla09x import sensor
+from carla09x.settings import CarlaSettings
 
 WINDOW_WIDTH = 800
 WINDOW_HEIGHT = 600

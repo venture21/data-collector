@@ -1,5 +1,5 @@
-from carla import sensor
-from carla.settings import CarlaSettings
+from carla09x import sensor
+from carla09x.settings import CarlaSettings
 """
 Example of dataset configuration. See a more complex example at coil_training_dataset.py
 """
