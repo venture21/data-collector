@@ -1,5 +1,5 @@
-from carla import sensor
-from carla.settings import CarlaSettings
+from carla09x import sensor
+from carla09x.settings import CarlaSettings
 """
 Configuration file used to collect the CARLA 100 data.
 A more simple comment example can be found at coil_training_dataset_singlecamera.py

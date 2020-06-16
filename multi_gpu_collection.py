@@ -4,8 +4,8 @@ import logging
 import subprocess
 import multiprocessing
 
-from carla.client import make_carla_client
-from carla.tcp import TCPConnectionError
+from carla09x.client import make_carla_client
+from carla09x.tcp import TCPConnectionError
 
 from collect import collect
 

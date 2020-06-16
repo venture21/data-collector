@@ -15,9 +15,9 @@ try:
 except ImportError:
     raise RuntimeError('cannot import numpy, make sure numpy package is installed')
 
-from carla.planner.planner import sldist
-from carla.planner.map import CarlaMap
-from carla import image_converter
+from carla09x.planner.planner import sldist
+from carla09x.planner.map import CarlaMap
+from carla09x import image_converter
 
 
 class Timer(object):

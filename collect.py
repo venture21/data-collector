@@ -17,18 +17,30 @@ import argparse
 import logging
 import random
 import time
+import re
+
+try:
+    import sys
+    import glob
+    import os
+    sys.path.append(glob.glob('/home/jhshin/Sources/carla/PythonAPI/carla/dist/carla-0.9.9-py3.7-linux-x86_64.egg')[0])
+    import carla
+except IndexError:
+    print('unable to import carla library')
+    pass
+
 
 try:
     import numpy as np
 except ImportError:
     raise RuntimeError('cannot import numpy, make sure numpy package is installed')
 
-from carla.client import make_carla_client
+from carla09x.client import make_carla_client
 
-from carla.tcp import TCPConnectionError
+from carla09x.tcp import TCPConnectionError
 from carla_game.carla_game import CarlaGame
-from carla.planner import Planner
-from carla.agent import HumanAgent, ForwardAgent, CommandFollower, LaneFollower
+from carla09x.planner import Planner
+from carla09x.agent import HumanAgent, ForwardAgent, CommandFollower, LaneFollower
 
 import modules.data_writer as writer
 from modules.noiser import Noiser
@@ -84,33 +96,180 @@ def get_directions(measurements, target_transform, planner):
 
     return directions
 
+def add_vehicles(client, num_actors, ego_vehicle_type='vehicle.tesla.model3'):
+    actor_list = []
+    world = client.get_world()
+    blueprints = world.get_blueprint_library().filter('vehicle.*')
 
+    blueprints = [x for x in blueprints if int(x.get_attribute('number_of_wheels')) == 4]
+    blueprints = [x for x in blueprints if not x.id.endswith('isetta')]
+    blueprints = [x for x in blueprints if not x.id.endswith('carlacola')]
+    blueprints = [x for x in blueprints if x.id != ego_vehicle_type]
+
+    spawn_points = world.get_map().get_spawn_points()
+    number_of_spawn_points = len(spawn_points)
+    logging.info("max spawn points: {0}".format(number_of_spawn_points))
+    if num_actors < number_of_spawn_points:
+        random.shuffle(spawn_points)
+    elif num_actors > number_of_spawn_points:
+        msg = 'requested %d vehicles, but could only find %d spawn points'
+        logging.warning(msg, num_actors, number_of_spawn_points)
+        num_actors = number_of_spawn_points
+
+    # @todo cannot import these directly.
+    SpawnActor = carla.command.SpawnActor
+    SetAutopilot = carla.command.SetAutopilot
+    FutureActor = carla.command.FutureActor
+
+    batch = []
+    for n, transform in enumerate(spawn_points):
+        if n >= num_actors:
+            break
+        blueprint = random.choice(blueprints)
+        if blueprint.has_attribute('color'):
+            color = random.choice(blueprint.get_attribute('color').recommended_values)
+            blueprint.set_attribute('color', color)
+        if blueprint.has_attribute('driver_id'):
+            driver_id = random.choice(blueprint.get_attribute('driver_id').recommended_values)
+            blueprint.set_attribute('driver_id', driver_id)
+        blueprint.set_attribute('role_name', 'autopilot')
+        batch.append(SpawnActor(blueprint, transform).then(SetAutopilot(FutureActor, True)))
+
+    for response in client.apply_batch_sync(batch):
+        if response.error:
+            logging.error(response.error)
+        else:
+            actor_list.append(response.actor_id)
+
+    print('spawned %d vehicles, press Ctrl+C to exit.' % len(actor_list))
+
+    while True:
+        world.wait_for_tick()
+
+
+def add_actors(client, num_actors, str_actor_type="walker.pedestrian.*"):
+    # 0. Choose a blueprint fo the walkers
+    world = client.get_world()
+    blueprintsWalkers = world.get_blueprint_library().filter(str_actor_type)
+    walker_bp = random.choice(blueprintsWalkers)
+
+    # 1. Take all the random locations to spawn
+    spawn_points = []
+    for i in range(num_actors):
+        spawn_point = carla.Transform()
+
+        spawn_point.location = world.get_random_location_from_navigation()
+        if (spawn_point.location != None):
+            spawn_points.append(spawn_point)
+
+    # 2. Build the batch of commands to spawn the pedestrians
+    batch = []
+    for spawn_point in spawn_points:
+        walker_bp = random.choice(blueprintsWalkers)
+        batch.append(carla.command.SpawnActor(walker_bp, spawn_point))
+
+    # 2.1 apply the batch
+    walkers_list = []
+    results = client.apply_batch_sync(batch, True)
+    for i in range(len(results)):
+        if results[i].error:
+            logging.error(results[i].error)
+        else:
+            walkers_list.append({"id": results[i].actor_id})
+
+    # 3. Spawn walker AI controllers for each walker
+    batch = []
+    walker_controller_bp = world.get_blueprint_library().find('controller.ai.walker')
+    for i in range(len(walkers_list)):
+        batch.append(carla.command.SpawnActor(walker_controller_bp, carla.Transform(), walkers_list[i]["id"]))
+
+    # 3.1 apply the batch
+    results = client.apply_batch_sync(batch, True)
+
+    for i in range(len(results)):
+        if results[i].error:
+            logging.error(results[i].error)
+        else:
+            walkers_list[i]["con"] = results[i].actor_id
+
+    all_id=[]
+    # 4. Put altogether the walker and controller ids
+    for i in range(len(walkers_list)):
+        all_id.append(walkers_list[i]["con"])
+        all_id.append(walkers_list[i]["id"])
+    all_actors = world.get_actors(all_id)
+
+    # wait for a tick to ensure client receives the last transform of the walkers we have just created
+    world.wait_for_tick()
+
+    # 5. initialize each controller and set target to walk to (list is [controller, actor, controller, actor ...])
+    for i in range(0, len(all_actors), 2):
+        # start walker
+        all_actors[i].start()
+        # set walk to random point
+        all_actors[i].go_to_location(world.get_random_location_from_navigation())
+        # random max speed
+        all_actors[i].set_max_speed(1 + random.random())  # max speed between 1 and 2 (default is 1.4 m/s)
+
+def start_episode(client, position):
+    world = client.get_world()
+    blueprint_library = world.get_blueprint_library()
+    player = blueprint_library.filter("model3")[0]
+    transform = random.choice(world.get_map().get_spawn_points())
+    vehicle = world.spawn_actor(player, transform)
+    return vehicle.get_location()
+
+def find_weather_presets():
+    rgx = re.compile('.+?(?:(?<=[a-z])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|$)')
+    name = lambda x: ' '.join(m.group(0) for m in rgx.finditer(x))
+    presets = [x for x in dir(carla.WeatherParameters) if re.match('[A-Z].+', x)]
+    return [(getattr(carla.WeatherParameters, x), name(x)) for x in presets]
 
 def new_episode(client, carla_settings, position, vehicle_pair, pedestrian_pair, set_of_weathers):
     """
     Start a CARLA new episode and generate a target to be pursued on this episode
     Args:
         client: the client connected to CARLA now
-        carla_settings: a carla settings object to be used
+        carla_settings: a carla09x settings object to be used
 
     Returns:
-        Returns the target position for this episode and the name of the current carla map.
+        Returns the target position for this episode and the name of the current carla09x map.
 
     """
 
     # Every time the seeds for the episode are different
     number_of_vehicles = random.randint(vehicle_pair[0], vehicle_pair[1])
     number_of_pedestrians = random.randint(pedestrian_pair[0], pedestrian_pair[1])
-    weather = random.choice(set_of_weathers)
+    weather = random.choice(find_weather_presets())
     carla_settings.set(
         NumberOfVehicles=number_of_vehicles,
         NumberOfPedestrians=number_of_pedestrians,
         WeatherId=weather
     )
-    scene = client.load_settings(carla_settings)
-    client.start_episode(position)
+    logging.info("Load setting for new episode")
 
-    return scene.map_name, scene.player_start_spots, weather, number_of_vehicles, number_of_pedestrians, \
+    client.reload_world()
+
+    world = client.get_world()
+    logging.info(weather)
+    world.set_weather(weather[0])
+    logging.info(world.get_weather())
+    # load settings here - pedestrians
+    logging.info("add actors")
+    add_actors(client, number_of_pedestrians, str_actor_type="walker.pedestrian.*")
+    #load settings here - vehicles
+    add_vehicles(client, number_of_vehicles)
+    # scene = client.load_settings(carla_settings)
+
+    #load settings here - new episode
+    logging.info("Start new episode")
+
+    player_start_position = start_episode(client, position)
+    world = client.get_world()
+    map_name = world.get_map().name
+
+
+    return map_name, player_start_position, weather, number_of_vehicles, number_of_pedestrians, \
            carla_settings.SeedVehicles, carla_settings.SeedPedestrians
 
 
@@ -146,6 +305,7 @@ def calculate_timeout(start_point, end_point, planner):
 def reset_episode(client, carla_game, settings_module, show_render):
 
     random_pose = random.choice(settings_module.POSITIONS)
+    logging.info("get new episode")
     town_name, player_start_spots, weather, number_of_vehicles, number_of_pedestrians, \
         seeds_vehicles, seeds_pedestrians = new_episode(client,
                                                         settings_module.make_carla_settings(),
@@ -154,11 +314,13 @@ def reset_episode(client, carla_game, settings_module, show_render):
                                                         settings_module.NumberOfPedestrians,
                                                         settings_module.set_of_weathers)
 
+    logging.info("initialize game")
     # Here when verbose is activated we also show the rendering window.
     carla_game.initialize_game(town_name, render_mode=show_render)
     carla_game.start_timer()
 
     # An extra planner is needed in order to calculate timeouts
+    logging.info("add planner")
     planner = Planner(town_name)
 
     carla_game.set_objective(player_start_spots[random_pose[1]])
@@ -201,14 +363,15 @@ def collect(client, args):
     """
     The main loop for the data collection process.
     Args:
-        client: carla client object
+        client: carla09x client object
         args: arguments passed on the data collection main.
 
     Returns:
         None
 
     """
-    # Here we instantiate a sample carla settings. The name of the configuration should be
+    logging.info("collecting data")
+    # Here we instantiate a sample carla09x settings. The name of the configuration should be
     # passed as a parameter.
     settings_module = __import__('dataset_configurations.' + (args.data_configuration_name),
                                  fromlist=['dataset_configurations'])
@@ -219,21 +382,31 @@ def collect(client, args):
 
     # Instatiate the carlagame debug screen. This is basically a interface to visualize
     # the oracle data collection process
+    logging.info("Get Carla Game")
     carla_game = CarlaGame(False, args.debug, WINDOW_WIDTH, WINDOW_HEIGHT, MINI_WINDOW_WIDTH,
                            MINI_WINDOW_HEIGHT)
 
     # The collision checker , checks for collision at any moment.
+    logging.info("Get Collision checker")
     collision_checker = CollisionChecker()
-
+    # TODO: add collision checker
+    # self.collision_sensor = None
+    # colhist = world.collision_sensor.get_collision_history()
+    # self.collision_sensor = CollisionSensor(self.player, self.hud)
+    # collision = [colhist[x + self.frame - 200] for x in range(0, 200)]
+    # collision = [x / max_col for x in collision]
     ##### Start the episode #####
     # ! This returns all the aspects from the episodes.
+    logging.info("Start Episode")
     episode_aspects = reset_episode(client, carla_game,
                                     settings_module, args.debug)
+    logging.info("Planner for town")
     planner = Planner(episode_aspects["town_name"])
     # We instantiate the agent, depending on the parameter
     controlling_agent = make_controlling_agent(args, episode_aspects["town_name"])
 
     # The noise object to add noise to some episodes is instanced
+    logging.info("Add noiser")
     longitudinal_noiser = Noiser('Throttle', frequency=15, intensity=10, min_noise_time_amount=2.0)
     lateral_noiser = Noiser('Spike', frequency=25, intensity=4, min_noise_time_amount=0.5)
 
@@ -244,6 +417,7 @@ def collect(client, args):
     ##### DATASET writer initialization #####
     # here we make the full path for the dataset that is going to be created.
     # Make dataset path
+    logging.info("write initialization")
     writer.make_dataset_path(args.data_path)
     # We start by writing the  metadata for the entire data collection process.
     # That basically involves writing the configuration that was set on the settings module.
@@ -323,6 +497,7 @@ def collect(client, args):
             # episode number.
 
             if episode_ended:
+                logging.info("the episode is ended.")
                 if episode_success:
                     episode_number += 1
                 else:
@@ -467,8 +642,9 @@ def main():
 
     while True:
         try:
-
+            logging.info('making carla09x client')
             with make_carla_client(args.host, args.port) as client:
+                logging.info(client)
                 collect(client, args)
                 break
 
