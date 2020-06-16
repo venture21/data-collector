@@ -56,7 +56,7 @@ class CommandFollower(Agent):
         The step function is where the action for the current simulation step is computed
         The command follower uses several
         Args:
-            measurements: carla09x measurements for all vehicles
+            measurements: carla measurements for all vehicles
             sensor_data: the sensor that attached to this vehicle
             directions: the planner directions to be used by the agent
             target: the transform of the target.

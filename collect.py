@@ -230,10 +230,10 @@ def new_episode(client, carla_settings, position, vehicle_pair, pedestrian_pair,
     Start a CARLA new episode and generate a target to be pursued on this episode
     Args:
         client: the client connected to CARLA now
-        carla_settings: a carla09x settings object to be used
+        carla_settings: a carla settings object to be used
 
     Returns:
-        Returns the target position for this episode and the name of the current carla09x map.
+        Returns the target position for this episode and the name of the current carla map.
 
     """
 
@@ -363,7 +363,7 @@ def collect(client, args):
     """
     The main loop for the data collection process.
     Args:
-        client: carla09x client object
+        client: carla client object
         args: arguments passed on the data collection main.
 
     Returns:
@@ -371,7 +371,7 @@ def collect(client, args):
 
     """
     logging.info("collecting data")
-    # Here we instantiate a sample carla09x settings. The name of the configuration should be
+    # Here we instantiate a sample carla settings. The name of the configuration should be
     # passed as a parameter.
     settings_module = __import__('dataset_configurations.' + (args.data_configuration_name),
                                  fromlist=['dataset_configurations'])
@@ -642,7 +642,7 @@ def main():
 
     while True:
         try:
-            logging.info('making carla09x client')
+            logging.info('making carla client')
             with make_carla_client(args.host, args.port) as client:
                 logging.info(client)
                 collect(client, args)

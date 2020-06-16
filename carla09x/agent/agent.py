@@ -20,5 +20,5 @@ class Agent(object):
         """
         Function to be redefined by an agent.
         params The measurements like speed, the image data and a target
-        :returns A carla09x Control object, with the steering/gas/brake for the agent
+        :returns A carla Control object, with the steering/gas/brake for the agent
         """
