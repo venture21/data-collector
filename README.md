@@ -1,6 +1,6 @@
-CARLA 0.8.4 Data Collector
+CARLA 0.9.9 Data Collector
 ==========================
-Repository for data collection in CARLA version 0.8.4.
+Repository for data collection in CARLA version 0.9.9.
 The data collected follows [this format](docs/dataset_format_description.md).
 
 
@@ -9,7 +9,7 @@ This repository contains the following features:
 * An expert demonstrator for data collection, [documented here](docs/agent_module.md).
 * The possibility to launch several CARLAs with docker for systems
 with many GPUs to do scale up data collection.
-* We also provide a version of CARLA's release 0.8.4 that does not switch gears. We call it CARLA Gear. This problem is discussed in [this issue](https://github.com/carla-simulator/carla/issues/269).
+* We also provide a version of CARLA's release 0.9.9 that does not switch gears. We call it CARLA Gear. This problem is discussed in [this issue](https://github.com/carla-simulator/carla/issues/269).
 
 
 
@@ -49,7 +49,7 @@ To install the CoIL large scale training framework, we provide a conda environme
 
 
 To run this data collector you need a special version
-of the CARLA server version 0.8.4. It is a version where
+of the CARLA server version 0.9.9. It is a version where
 the ego-vehicle has a single gear.
 This problem is discussed in [this issue](https://github.com/carla-simulator/carla/issues/269).
 
